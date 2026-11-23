@@ -45,4 +45,12 @@ jobs:
         with:
           python-version: "3.14"
       - run: pip install pytest-homeassistant-custom-component pyyaml
-      - run: pytest -q
+      - name: pytest
+        run: |
+          set -o pipefail
+          pytest -q -rfE --tb=short 2>&1 | tee pytest.log || {
+            # Surface the failure summary as annotations, readable without logging in.
+            grep -E "^(FAILED|ERROR|E  )" pytest.log | head -20 | while IFS= read -r line; do echo "::error::$line"; done
+            tail -5 pytest.log | while IFS= read -r line; do echo "::error::$line"; done
+            exit 1
+          }
