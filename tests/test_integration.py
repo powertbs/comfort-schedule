@@ -4,7 +4,6 @@ profile sensor, and that the automations actually drive the thermostat."""
 from datetime import datetime
 from pathlib import Path
 
-from freezegun.api import FrozenDateTimeFactory
 import pytest
 import yaml
 
@@ -18,6 +17,10 @@ from pytest_homeassistant_custom_component.common import (
 )
 
 DOMAIN = "comfort_schedule"
+
+# Start every test on Monday 09:00 UTC, before Home Assistant and the websocket
+# login are created, so the clock never jumps under an open connection.
+pytestmark = pytest.mark.freeze_time("2026-11-23 09:00:00+00:00")
 USER_AUTOMATION = {
     "id": "mine",
     "alias": "My own automation",
@@ -57,14 +60,12 @@ PROFILES = [
 
 @pytest.fixture
 async def ws(hass, hass_ws_client):
-    """Connect before the clock is moved, so the login token is valid."""
     return await hass_ws_client(hass)
 
 
 @pytest.fixture
-async def setup(hass: HomeAssistant, ws, freezer: FrozenDateTimeFactory):
+async def setup(hass: HomeAssistant, ws):
     await hass.config.async_set_time_zone("UTC")
-    freezer.move_to(datetime(2026, 11, 23, 9, 0, tzinfo=dt_util.UTC))  # Monday 09:00
     config_dir = Path(hass.config.config_dir)
     (config_dir / "configuration.yaml").write_text("automation: !include automations.yaml\n")
     (config_dir / "automations.yaml").write_text(yaml.safe_dump([USER_AUTOMATION]))

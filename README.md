@@ -13,18 +13,17 @@ Control4-style thermostat schedules for Home Assistant, which run as **real auto
 
 ## Install
 
-### HACS (custom repository)
+### Marketplace (Home Assistant 2026.11 and newer)
 
-1. HACS → ⋮ → **Custom repositories**.
-2. Add this repository's URL, category **Integration**.
-3. Install **Comfort Schedule** and restart Home Assistant.
-4. **Settings → Devices & services → Add integration → Comfort Schedule**.
+1. **Settings → Marketplace → Add from link**, and enter `https://github.com/powertbs/comfort-schedule`. The Marketplace asks you to connect GitHub the first time.
+2. Install **Comfort Schedule** and restart Home Assistant.
+3. **Settings → Devices & services → Add integration → Comfort Schedule**.
 
 The card is included in the integration and loads by itself, so you don't need to add a dashboard resource.
 
 ### Manual
 
-Copy `custom_components/comfort_schedule` to `/config/custom_components/comfort_schedule`, restart, then add the integration as in step 4.
+Copy `custom_components/comfort_schedule` to `/config/custom_components/comfort_schedule`, restart, then add the integration as in step 3.
 
 ### Requirement
 
@@ -91,4 +90,4 @@ pip install pytest-homeassistant-custom-component pyyaml
 pytest            # automation builder + end-to-end tests in Home Assistant
 ```
 
-The built card is committed because HACS installs the integration folder as it is.
+The built card is committed because the Marketplace installs the integration folder as it is.

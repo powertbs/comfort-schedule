@@ -4,7 +4,7 @@ import terser from "@rollup/plugin-terser";
 
 const dev = process.env.ROLLUP_WATCH === "true";
 
-// The built card is committed inside the integration so HACS installs both together.
+// The built card is committed inside the integration so the Marketplace installs both together.
 export default {
   input: "src/comfort-schedule-card.ts",
   output: {
