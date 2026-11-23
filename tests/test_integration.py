@@ -59,12 +59,14 @@ PROFILES = [
 
 
 @pytest.fixture
-async def ws(hass, hass_ws_client):
+async def ws(hass, hass_ws_client, setup):
+    """Connect after the integration is loaded: the test web server cannot take
+    new routes (the card's URL) once a client has started it."""
     return await hass_ws_client(hass)
 
 
 @pytest.fixture
-async def setup(hass: HomeAssistant, ws):
+async def setup(hass: HomeAssistant):
     await hass.config.async_set_time_zone("UTC")
     config_dir = Path(hass.config.config_dir)
     (config_dir / "configuration.yaml").write_text("automation: !include automations.yaml\n")
