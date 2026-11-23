@@ -1,7 +1,7 @@
 """Constants for Comfort Schedule."""
 
 DOMAIN = "comfort_schedule"
-VERSION = "0.0.1"
+VERSION = "0.0.2"
 
 STORAGE_KEY = DOMAIN
 STORAGE_VERSION = 1

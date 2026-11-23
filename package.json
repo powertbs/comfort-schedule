@@ -1,6 +1,6 @@
 {
   "name": "comfort-schedule",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Control4-style thermostat schedules for Home Assistant that run as real automations.",
   "type": "module",
   "private": true,

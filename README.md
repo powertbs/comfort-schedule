@@ -8,7 +8,7 @@ Control4-style thermostat schedules for Home Assistant, which run as **real auto
 
 <p>
   <img src="docs/card.png" width="45%" alt="Comfort Schedule card showing the Winter Home profile with three time boxes">
-  <img src="docs/editing.png" width="45%" alt="Editing a profile's conditions and one time box">
+  <img src="docs/editing.png" width="45%" alt="Editing one time box for Monday to Friday at once">
 </p>
 
 ## Install
@@ -62,7 +62,13 @@ Each scheduled thermostat gets a sensor, `sensor.<thermostat>_comfort_profile`, 
 
 - Pick a day, then **+ Add time**. Click a box to change its time, mode, setpoint (or low/high for Heat/Cool) and optionally the fan.
 - A box stays in effect until the next box, including past midnight. A day with no boxes keeps the last box of the previous day.
+- To edit several days at once, tap the select-days button next to the days, then tap the days you want, or use Workdays, Weekend or Every day. Every change applies to all the selected days.
 - Use the copy button next to the days to copy one day to others: workdays, weekend or every day.
+- Type a setpoint directly, or use − and +.
+
+### Change the thermostat now
+
+Tap the status line under the thermostat name (for example *66° now · Off · Change*) to set the mode and temperature right away. The schedule takes over again at its next time.
 
 ## How the automations work
 

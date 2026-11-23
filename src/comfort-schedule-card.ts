@@ -27,7 +27,7 @@ import {
 } from "./ha";
 import "./editor";
 
-const VERSION = "0.0.1";
+const VERSION = "0.0.2";
 const STORAGE_KEY = "comfort-schedule-card:selected";
 
 interface CardConfig {
@@ -60,7 +60,10 @@ class ComfortScheduleCard extends LitElement {
     _selected: { state: true },
     _draft: { state: true },
     _profileIdx: { state: true },
-    _day: { state: true },
+    _days: { state: true },
+    _multi: { state: true },
+    _nowOpen: { state: true },
+    _nowPending: { state: true },
     _editing: { state: true },
     _settingsOpen: { state: true },
     _copyOpen: { state: true },
@@ -81,7 +84,12 @@ class ComfortScheduleCard extends LitElement {
   private _draft: Profile[] = [];
   private _baseline = "";
   private _profileIdx = 0;
-  private _day: Day = dayOf(new Date());
+  /** Selected days. Edits apply to all of them; the first (Mon-first order) is shown. */
+  private _days: Day[] = [dayOf(new Date())];
+  private _multi = false;
+  private _nowOpen = false;
+  private _nowPending: Record<string, number> = {};
+  private _nowTimer?: number;
   private _editing: number | null = null;
   private _settingsOpen = false;
   private _copyOpen = false;
@@ -212,6 +220,37 @@ class ComfortScheduleCard extends LitElement {
     return this.hass?.states[this._selected];
   }
 
+  private get _day(): Day {
+    return DAYS.find((d) => this._days.includes(d)) ?? this._days[0];
+  }
+
+  private _pickDay(day: Day) {
+    this._editing = null;
+    if (!this._multi) {
+      this._days = [day];
+      return;
+    }
+    if (this._days.includes(day)) {
+      if (this._days.length > 1) this._days = this._days.filter((d) => d !== day);
+    } else {
+      this._days = [...this._days, day];
+    }
+  }
+
+  private _setMulti(on: boolean) {
+    this._multi = on;
+    this._copyOpen = false;
+    if (!on) this._days = [this._day];
+  }
+
+  /** Selected days whose times differ from the shown (first) day. */
+  private get _differentDays(): Day[] {
+    const shown = JSON.stringify(this._profile.days[this._day]);
+    return DAYS.filter(
+      (d) => this._days.includes(d) && d !== this._day && JSON.stringify(this._profile.days[d]) !== shown
+    );
+  }
+
   private _updateProfile(change: (p: Profile) => Profile) {
     const idx = Math.min(this._profileIdx, this._draft.length - 1);
     this._draft = this._draft.map((p, i) => (i === idx ? change(clone(p)) : p));
@@ -220,7 +259,8 @@ class ComfortScheduleCard extends LitElement {
 
   private _updateSlots(change: (slots: Slot[]) => Slot[]) {
     this._updateProfile((p) => {
-      p.days[this._day] = change(p.days[this._day]);
+      const result = change(p.days[this._day]);
+      for (const d of this._days) p.days[d] = clone(result);
       return p;
     });
   }
@@ -365,18 +405,48 @@ class ComfortScheduleCard extends LitElement {
     this._setSlot(index, (s) => ({ ...s, time: value }));
   }
 
-  private _step(index: number, key: "temperature" | "target_temp_low" | "target_temp_high", dir: 1 | -1) {
+  private _clampTemp(value: number): number {
     const limits = tempLimits(this.hass!, this._entity);
+    const rounded = Math.round(value * 10) / 10;
+    return Math.min(limits.max, Math.max(limits.min, rounded));
+  }
+
+  private _setTemp(index: number, key: "temperature" | "target_temp_low" | "target_temp_high", value: number) {
+    if (!Number.isFinite(value)) return;
     this._setSlot(index, (s) => {
-      const current = Number(s[key] ?? limits.fallback);
-      const value = Math.round((current + dir * limits.step) * 10) / 10;
-      const next = { ...s, [key]: Math.min(limits.max, Math.max(limits.min, value)) };
+      const next = { ...s, [key]: this._clampTemp(value) };
       if (next.target_temp_low !== undefined && next.target_temp_high !== undefined && next.target_temp_low > next.target_temp_high) {
         if (key === "target_temp_low") next.target_temp_high = next.target_temp_low;
         else next.target_temp_low = next.target_temp_high;
       }
       return next;
     });
+  }
+
+  // ----- change the thermostat right now -----------------------------------
+
+  private _nowMode(mode: string) {
+    this.hass!.callService("climate", "set_hvac_mode", { entity_id: this._selected, hvac_mode: mode });
+  }
+
+  /** Setpoint changes are sent after a short pause so +/- taps don't flood the thermostat. */
+  private _nowTemp(key: "temperature" | "target_temp_low" | "target_temp_high", value: number) {
+    if (!Number.isFinite(value)) return;
+    this._nowPending = { ...this._nowPending, [key]: this._clampTemp(value) };
+    clearTimeout(this._nowTimer);
+    this._nowTimer = window.setTimeout(() => {
+      const a = this._entity?.attributes ?? {};
+      const data: Record<string, unknown> = { entity_id: this._selected };
+      if ("target_temp_low" in this._nowPending || "target_temp_high" in this._nowPending) {
+        data.target_temp_low = this._nowPending.target_temp_low ?? a.target_temp_low;
+        data.target_temp_high = this._nowPending.target_temp_high ?? a.target_temp_high;
+      } else {
+        data.temperature = this._nowPending.temperature;
+      }
+      this.hass!.callService("climate", "set_temperature", data).finally(() => {
+        this._nowPending = {};
+      });
+    }, 700);
   }
 
   private _removeSlot(index: number) {
@@ -420,10 +490,6 @@ class ComfortScheduleCard extends LitElement {
     return formatTime(time, uses12h(this.hass!));
   }
 
-  private _temp(value: number | undefined): string {
-    return value === undefined || value === null ? "–" : `${value}°`;
-  }
-
   private _slotSummary(slot: Slot): string {
     const mode = modeLabel(slot.hvac_mode);
     if (slot.hvac_mode === "off") return mode;
@@ -450,8 +516,9 @@ class ComfortScheduleCard extends LitElement {
 
     return html`
       <ha-card>
-        ${this._renderHeader()} ${this._renderStatus()} ${this._renderTabs()}
+        ${this._renderHeader()} ${this._renderStatus()} ${this._nowOpen ? this._renderNow() : nothing} ${this._renderTabs()}
         ${this._settingsOpen ? this._renderSettings() : nothing} ${this._renderDays()}
+        ${this._multi ? this._renderMultiBar() : nothing}
         ${this._copyOpen ? this._renderCopy() : nothing} ${this._renderSlots()}
         ${this._renderFooter()}
       </ha-card>
@@ -493,8 +560,56 @@ class ComfortScheduleCard extends LitElement {
     }
     const active = this._activeProfileName();
     return html`<div class="status">
-      <span>${parts.join(" · ")}</span>
+      <button class="now-btn" @click=${() => (this._nowOpen = !this._nowOpen)} title="Change the thermostat now">
+        ${parts.join(" · ")} <span class="caret">${this._nowOpen ? "Close" : "Change"}</span>
+      </button>
       <span class="active ${active ? "" : "none"}">${active ? `${active} active` : this._data?.[this._selected] ? "No profile active" : "Not scheduled yet"}</span>
+    </div>`;
+  }
+
+  /** A − [typed number] + control. */
+  private _tempControl(value: number | undefined, colour: string, onSet: (v: number) => void, label?: string) {
+    const limits = tempLimits(this.hass!, this._entity);
+    const current = value ?? limits.fallback;
+    return html`<div class="stepper">
+      ${label ? html`<span class="lbl">${label}</span>` : nothing}
+      <button @click=${() => onSet(current - limits.step)}>−</button>
+      <input class="num mode-${colour}" type="number" inputmode="decimal"
+        .value=${value === undefined ? "" : String(value)} min=${limits.min} max=${limits.max} step=${limits.step}
+        @focus=${(e: Event) => (e.target as HTMLInputElement).select()}
+        @keydown=${(e: KeyboardEvent) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+        @change=${(e: Event) => onSet(parseFloat((e.target as HTMLInputElement).value))} />
+      <button @click=${() => onSet(current + limits.step)}>+</button>
+    </div>`;
+  }
+
+  private _renderNow() {
+    const entity = this._entity;
+    if (!entity) return nothing;
+    const a = entity.attributes;
+    const modes: string[] = a.hvac_modes ?? [];
+    const pending = this._nowPending;
+    const range =
+      entity.state !== "off" && a.target_temp_low != null && a.target_temp_high != null && a.temperature == null;
+    let setpoint: unknown = nothing;
+    if (entity.state !== "off" && range) {
+      setpoint = html`<div class="row steppers">
+        ${this._tempControl(pending.target_temp_low ?? a.target_temp_low, "heat", (v) => this._nowTemp("target_temp_low", v), "Heat to")}
+        ${this._tempControl(pending.target_temp_high ?? a.target_temp_high, "cool", (v) => this._nowTemp("target_temp_high", v), "Cool to")}
+      </div>`;
+    } else if (entity.state !== "off" && (a.temperature != null || pending.temperature != null)) {
+      setpoint = html`<div class="row steppers">
+        ${this._tempControl(pending.temperature ?? a.temperature, entity.state, (v) => this._nowTemp("temperature", v))}
+      </div>`;
+    }
+    return html`<div class="now-panel">
+      <div class="hint">Changes the thermostat now. The schedule takes over again at its next time.</div>
+      <div class="chips">
+        ${modes.map(
+          (m) => html`<button class="chip ${m === entity.state ? "on" : ""}" @click=${() => this._nowMode(m)}>${modeLabel(m)}</button>`
+        )}
+      </div>
+      ${setpoint}
     </div>`;
   }
 
@@ -589,17 +704,44 @@ class ComfortScheduleCard extends LitElement {
     return html`
       <div class="days">
         ${DAYS.map(
-          (d) => html`<button class="day ${d === this._day ? "selected" : ""} ${d === today ? "today" : ""} ${this._profile.days[d].length ? "" : "unset"}"
-            @click=${() => { this._day = d; this._editing = null; }}>
+          (d) => html`<button class="day ${this._days.includes(d) ? "selected" : ""} ${this._multi ? "multi" : ""} ${d === today ? "today" : ""} ${this._profile.days[d].length ? "" : "unset"}"
+            @click=${() => this._pickDay(d)}>
             ${DAY_LABEL[d]}
           </button>`
         )}
+        <button class="copy ${this._multi ? "on" : ""}" title="Select several days" @click=${() => this._setMulti(!this._multi)}>
+          <svg viewBox="0 0 24 24"><path d="M20,2H8A2,2 0 0,0 6,4V16A2,2 0 0,0 8,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2M20,16H8V4H20V16M16,20V22H4A2,2 0 0,1 2,20V7H4V20H16M18.53,8.06L17.47,7L12.76,11.71L10.64,9.6L9.58,10.66L12.76,13.84L18.53,8.06Z" /></svg>
+        </button>
         <button class="copy" title="Copy this day to other days"
-          @click=${() => { this._copyOpen = !this._copyOpen; this._copyTargets = []; }}>
+          @click=${() => { const open = !this._copyOpen; this._setMulti(false); this._copyOpen = open; this._copyTargets = []; }}>
           <svg viewBox="0 0 24 24"><path d="M19,21H8V7H19M19,5H8A2,2 0 0,0 6,7V21A2,2 0 0,0 8,23H19A2,2 0 0,0 21,21V7A2,2 0 0,0 19,5M16,1H4A2,2 0 0,0 2,3V17H4V3H16V1Z" /></svg>
         </button>
       </div>
     `;
+  }
+
+  private _renderMultiBar() {
+    const set = (days: Day[]) => {
+      this._days = days;
+      this._editing = null;
+    };
+    const different = this._differentDays;
+    const which = this._days.length === 7 ? "every day" : DAYS.filter((d) => this._days.includes(d)).map((d) => DAY_LABEL[d]).join(", ");
+    return html`<div class="multi-bar">
+      <div class="row buttons">
+        <button @click=${() => set(WORKDAYS)}>Workdays</button>
+        <button @click=${() => set(WEEKEND)}>Weekend</button>
+        <button @click=${() => set([...DAYS])}>Every day</button>
+        <span class="grow"></span>
+        <button class="primary" @click=${() => this._setMulti(false)}>Done</button>
+      </div>
+      <div class="hint">
+        Tap days to add or remove them. Changes apply to ${which}.
+        ${different.length
+          ? html`<br /><span class="warn">${different.map((d) => DAY_LABEL[d]).join(", ")} ${different.length === 1 ? "has" : "have"} different times; the first change replaces them with ${DAY_LABEL[this._day]}'s times below.</span>`
+          : nothing}
+      </div>
+    </div>`;
   }
 
   private _renderCopy() {
@@ -643,7 +785,7 @@ class ComfortScheduleCard extends LitElement {
                   </span>
                 </div>`;
             })
-          : html`<div class="empty-day">No times on ${DAY_LABEL[this._day]}. The last time of the previous day stays in effect.</div>`}
+          : html`<div class="empty-day">No times on ${this._days.length > 1 ? "these days" : DAY_LABEL[this._day]}. The last time of the previous day stays in effect.</div>`}
         <button class="add-box" @click=${this._addSlot}>+ Add time</button>
       </div>
     `;
@@ -654,13 +796,13 @@ class ComfortScheduleCard extends LitElement {
     const modes: string[] = entity?.attributes.hvac_modes ?? ["heat", "cool", "heat_cool", "off"];
     const fanModes: string[] | undefined = entity?.attributes.fan_modes;
     const allModes = modes.includes(s.hvac_mode) ? modes : [...modes, s.hvac_mode];
-    const stepper = (key: "temperature" | "target_temp_low" | "target_temp_high", label?: string) => html`
-      <div class="stepper">
-        ${label ? html`<span class="lbl">${label}</span>` : nothing}
-        <button @click=${() => this._step(i, key, -1)}>−</button>
-        <span class="num mode-${key === "target_temp_low" ? "heat" : key === "target_temp_high" ? "cool" : s.hvac_mode}">${this._temp(s[key])}</span>
-        <button @click=${() => this._step(i, key, 1)}>+</button>
-      </div>`;
+    const stepper = (key: "temperature" | "target_temp_low" | "target_temp_high", label?: string) =>
+      this._tempControl(
+        s[key],
+        key === "target_temp_low" ? "heat" : key === "target_temp_high" ? "cool" : s.hvac_mode,
+        (v) => this._setTemp(i, key, v),
+        label
+      );
     return html`
       <div class="box editing">
         <div class="row">
@@ -797,7 +939,20 @@ class ComfortScheduleCard extends LitElement {
     .stepper { display: flex; align-items: center; gap: 10px; }
     .stepper .lbl { font-size: 13px; color: var(--cs-muted); }
     .stepper button { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--cs-line); font-size: 20px; line-height: 1; }
-    .stepper .num { font-size: 28px; min-width: 56px; text-align: center; }
+    .stepper .num {
+      font: inherit; font-size: 28px; width: 72px; text-align: center; background: transparent;
+      border: none; border-bottom: 1px dashed var(--cs-line); border-radius: 0; padding: 2px 0;
+      -moz-appearance: textfield; appearance: textfield;
+    }
+    .stepper .num::-webkit-outer-spin-button, .stepper .num::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    .stepper .num:focus { outline: none; border-bottom-color: var(--cs-accent); }
+    .now-btn { padding: 0; text-align: left; color: var(--cs-muted); font-size: 14px; }
+    .now-btn .caret { color: var(--cs-accent); margin-left: 6px; }
+    .now-panel { padding: 4px 16px 12px; display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid var(--cs-line); }
+    .copy.on svg { fill: var(--cs-accent); }
+    .day.multi.selected { color: var(--cs-accent); }
+    .multi-bar { padding: 8px 16px; display: flex; flex-direction: column; gap: 6px; border-bottom: 1px solid var(--cs-line); }
+    .warn { color: var(--warning-color, #ffa600); }
     .empty-day { padding: 16px; color: var(--cs-muted); font-size: 14px; }
     .add-box { padding: 14px; color: var(--cs-accent); font-size: 15px; text-align: left; padding-left: 16px; }
     .msg { padding: 8px 16px; font-size: 13px; }

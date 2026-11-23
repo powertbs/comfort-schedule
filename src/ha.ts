@@ -7,6 +7,7 @@ export interface HassEntity {
 export interface Hass {
   states: Record<string, HassEntity>;
   callWS<T>(msg: Record<string, unknown>): Promise<T>;
+  callService(domain: string, service: string, data?: Record<string, unknown>): Promise<unknown>;
   locale?: { language?: string; time_format?: string };
   language?: string;
   user?: { is_admin?: boolean };
