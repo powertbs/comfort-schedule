@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Comfort Schedule",
+        "description": "Adds the Comfort Schedule card. Add the card to a dashboard to build a schedule for each thermostat; saving it creates automations under Settings → Automations."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Comfort Schedule is already set up."
+    }
+  }
+}

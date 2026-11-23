@@ -1,0 +1,23 @@
+{
+  "domain": "comfort_schedule",
+  "name": "Comfort Schedule",
+  "after_dependencies": [
+    "frontend"
+  ],
+  "codeowners": [
+    "@powertbs"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "automation",
+    "http",
+    "websocket_api"
+  ],
+  "documentation": "https://github.com/powertbs/comfort-schedule",
+  "integration_type": "service",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/powertbs/comfort-schedule/issues",
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "0.0.1"
+}
